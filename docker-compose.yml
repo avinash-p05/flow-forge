@@ -1,0 +1,92 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: flowforge-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: flowforge
+      POSTGRES_USER: flowforge
+      POSTGRES_PASSWORD: flowforge
+    ports:
+      - "5433:5432"
+    volumes:
+      - flowforge-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flowforge -d flowforge"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: flowforge-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - flowforge-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./app
+      dockerfile: Dockerfile.api
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgresql://flowforge:flowforge@postgres:5432/flowforge
+      REDIS_URL: redis://redis:6379
+      AUTH_TOKEN_SECRET: ${AUTH_TOKEN_SECRET:-AkgcU6gcPi7aUZPemWD8ktt0j9305Rql}
+      AUTH_ACCESS_TOKEN_TTL_SECONDS: ${AUTH_ACCESS_TOKEN_TTL_SECONDS:-900}
+      AUTH_REFRESH_TOKEN_TTL_SECONDS: ${AUTH_REFRESH_TOKEN_TTL_SECONDS:-604800}
+      AUTH_TOKEN_ISSUER: flowforge-server
+      AUTH_TOKEN_AUDIENCE: flowforge-client
+      JOB_TIMEOUT_MS: ${JOB_TIMEOUT_MS:-30000}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      SQS_QUEUE_URL: ${SQS_QUEUE_URL:-}
+      SQS_VISIBILITY_TIMEOUT_SECONDS: ${SQS_VISIBILITY_TIMEOUT_SECONDS:-60}
+      SQS_WAIT_TIME_SECONDS: ${SQS_WAIT_TIME_SECONDS:-20}
+      SQS_MAX_MESSAGES: ${SQS_MAX_MESSAGES:-10}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    build:
+      context: ./app
+      dockerfile: Dockerfile.worker
+    environment:
+      DATABASE_URL: postgresql://flowforge:flowforge@postgres:5432/flowforge
+      REDIS_URL: redis://redis:6379
+      AUTH_TOKEN_SECRET: ${AUTH_TOKEN_SECRET:-AkgcU6gcPi7aUZPemWD8ktt0j9305Rql}
+      AUTH_ACCESS_TOKEN_TTL_SECONDS: ${AUTH_ACCESS_TOKEN_TTL_SECONDS:-900}
+      AUTH_REFRESH_TOKEN_TTL_SECONDS: ${AUTH_REFRESH_TOKEN_TTL_SECONDS:-604800}
+      AUTH_TOKEN_ISSUER: flowforge-server
+      AUTH_TOKEN_AUDIENCE: flowforge-client
+      JOB_TIMEOUT_MS: ${JOB_TIMEOUT_MS:-30000}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      SQS_QUEUE_URL: ${SQS_QUEUE_URL:-}
+      SQS_VISIBILITY_TIMEOUT_SECONDS: ${SQS_VISIBILITY_TIMEOUT_SECONDS:-60}
+      SQS_WAIT_TIME_SECONDS: ${SQS_WAIT_TIME_SECONDS:-20}
+      SQS_MAX_MESSAGES: ${SQS_MAX_MESSAGES:-10}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  flowforge-postgres-data:
+  flowforge-redis-data:
