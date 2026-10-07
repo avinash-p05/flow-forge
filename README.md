@@ -118,6 +118,18 @@ npm run worker
 
 The API is available at `http://localhost:3000`.
 
+## GitHub Pages architecture diagram
+
+The standalone architecture diagram is deployed automatically by
+`.github/workflows/pages.yml` whenever `flowforge-architecture.html` changes
+on `main` or `master`. After enabling GitHub Pages for the repository with
+**Source: GitHub Actions**, it is available at:
+
+```text
+https://avinash-p05.github.io/flow-forge/
+https://avinash-p05.github.io/flow-forge/flowforge-architecture.html
+```
+
 Build the frontend and serve it from the same Express process:
 
 ```powershell
