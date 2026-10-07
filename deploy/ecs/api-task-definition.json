@@ -1,0 +1,43 @@
+{
+  "family": "flowforge-api",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::<account-id>:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::<account-id>:role/flowforge-api-task-role",
+  "containerDefinitions": [
+    {
+      "name": "flowforge-api",
+      "image": "<account-id>.dkr.ecr.<region>.amazonaws.com/flowforge-api:<tag>",
+      "essential": true,
+      "portMappings": [{ "containerPort": 3000, "protocol": "tcp" }],
+      "environment": [
+        { "name": "NODE_ENV", "value": "production" },
+        { "name": "PORT", "value": "3000" },
+        { "name": "AWS_REGION", "value": "<region>" },
+        { "name": "SQS_QUEUE_URL", "value": "https://sqs.<region>.amazonaws.com/<account-id>/flowforge-executions" }
+      ],
+      "secrets": [
+        { "name": "DATABASE_URL", "valueFrom": "<secrets-manager-database-url-arn>" },
+        { "name": "REDIS_URL", "valueFrom": "<secrets-manager-redis-url-arn>" },
+        { "name": "AUTH_TOKEN_SECRET", "valueFrom": "<secrets-manager-auth-secret-arn>" }
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "wget --spider -q http://localhost:3000/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 20
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/flowforge",
+          "awslogs-region": "<region>",
+          "awslogs-stream-prefix": "api"
+        }
+      }
+    }
+  ]
+}

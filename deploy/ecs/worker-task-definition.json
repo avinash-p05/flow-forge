@@ -1,0 +1,34 @@
+{
+  "family": "flowforge-worker",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::<account-id>:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::<account-id>:role/flowforge-worker-task-role",
+  "containerDefinitions": [
+    {
+      "name": "flowforge-worker",
+      "image": "<account-id>.dkr.ecr.<region>.amazonaws.com/flowforge-worker:<tag>",
+      "essential": true,
+      "environment": [
+        { "name": "NODE_ENV", "value": "production" },
+        { "name": "AWS_REGION", "value": "<region>" },
+        { "name": "SQS_QUEUE_URL", "value": "https://sqs.<region>.amazonaws.com/<account-id>/flowforge-executions" }
+      ],
+      "secrets": [
+        { "name": "DATABASE_URL", "valueFrom": "<secrets-manager-database-url-arn>" },
+        { "name": "REDIS_URL", "valueFrom": "<secrets-manager-redis-url-arn>" },
+        { "name": "AUTH_TOKEN_SECRET", "valueFrom": "<secrets-manager-auth-secret-arn>" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/flowforge",
+          "awslogs-region": "<region>",
+          "awslogs-stream-prefix": "worker"
+        }
+      }
+    }
+  ]
+}

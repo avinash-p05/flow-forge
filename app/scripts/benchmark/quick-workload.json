@@ -1,0 +1,80 @@
+{
+  "generatedAt": "benchmark-run-input",
+  "workloads": [
+    {
+      "name": "quick-sequential",
+      "executions": 4,
+      "input": {
+        "workload": "quick-sequential"
+      },
+      "steps": [
+        {
+          "id": "step-1",
+          "name": "Step 1",
+          "type": "transform",
+          "config": {
+            "operation": "set",
+            "key": "step1",
+            "value": true
+          },
+          "dependsOn": []
+        },
+        {
+          "id": "step-2",
+          "name": "Step 2",
+          "type": "transform",
+          "config": {
+            "operation": "set",
+            "key": "step2",
+            "value": true
+          },
+          "dependsOn": [
+            "step-1"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "quick-parallel",
+      "executions": 4,
+      "input": {
+        "workload": "quick-parallel"
+      },
+      "steps": [
+        {
+          "id": "parallel-1",
+          "name": "Parallel 1",
+          "type": "worker",
+          "config": {
+            "result": {
+              "branch": 1
+            }
+          },
+          "dependsOn": []
+        },
+        {
+          "id": "parallel-2",
+          "name": "Parallel 2",
+          "type": "worker",
+          "config": {
+            "result": {
+              "branch": 2
+            }
+          },
+          "dependsOn": []
+        },
+        {
+          "id": "parallel-3",
+          "name": "Parallel 3",
+          "type": "worker",
+          "config": {
+            "result": {
+              "branch": 3
+            }
+          },
+          "dependsOn": []
+        }
+      ]
+    }
+  ]
+}

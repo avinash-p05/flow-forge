@@ -1,0 +1,216 @@
+openapi: 3.0.3
+info:
+  title: FlowForge API
+  version: 1.0.0
+  description: Workflow definition and asynchronous execution API.
+servers:
+  - url: http://localhost:3000
+tags:
+  - name: System
+  - name: Authentication
+  - name: Workflows
+  - name: Executions
+paths:
+  /health:
+    get:
+      tags: [System]
+      responses:
+        '200':
+          description: API health status
+  /metrics:
+    get:
+      tags: [System]
+      responses:
+        '200':
+          description: Process metrics
+  /auth/register:
+    post:
+      tags: [Authentication]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Credentials'
+      responses:
+        '201': { description: User registered }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { description: Email already registered }
+  /auth/login:
+    post:
+      tags: [Authentication]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Credentials'
+      responses:
+        '200': { $ref: '#/components/responses/TokenPair' }
+        '401': { description: Invalid credentials }
+  /auth/refresh:
+    post:
+      tags: [Authentication]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/TokenPair' }
+  /workflows:
+    get:
+      tags: [Workflows]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Workflow list }
+    post:
+      tags: [Workflows]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WorkflowInput' }
+      responses:
+        '201': { description: Workflow created }
+  /workflows/{workflowId}:
+    parameters:
+      - $ref: '#/components/parameters/workflowId'
+    get:
+      tags: [Workflows]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Workflow }
+        '404': { description: Workflow not found }
+    put:
+      tags: [Workflows]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WorkflowInput' }
+      responses:
+        '200': { description: Workflow updated }
+    delete:
+      tags: [Workflows]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '204': { description: Workflow deleted }
+  /workflows/{workflowId}/executions:
+    post:
+      tags: [Executions]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/workflowId'
+        - in: header
+          name: Idempotency-Key
+          schema: { type: string, maxLength: 255 }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                input: { type: object, additionalProperties: true }
+      responses:
+        '202': { description: Execution queued }
+  /executions/{executionId}:
+    get:
+      tags: [Executions]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/executionId'
+      responses:
+        '200': { description: Execution status and output }
+  /executions/{executionId}/jobs:
+    get:
+      tags: [Executions]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/executionId'
+      responses:
+        '200': { description: Runtime jobs }
+  /executions/{executionId}/history:
+    get:
+      tags: [Executions]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/executionId'
+      responses:
+        '200': { description: Audit history }
+  /executions/{executionId}/cancel:
+    post:
+      tags: [Executions]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/executionId'
+      responses:
+        '204': { description: Execution cancelled }
+components:
+  parameters:
+    workflowId:
+      in: path
+      name: workflowId
+      required: true
+      schema: { type: string, format: uuid }
+    executionId:
+      in: path
+      name: executionId
+      required: true
+      schema: { type: string, format: uuid }
+  responses:
+    BadRequest:
+      description: Invalid request
+    TokenPair:
+      description: Access and refresh tokens
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/TokenPair' }
+  schemas:
+    Credentials:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+    TokenPair:
+      type: object
+      required: [token, refreshToken]
+      properties:
+        token: { type: string }
+        refreshToken: { type: string }
+    WorkflowInput:
+      type: object
+      required: [name, definition]
+      properties:
+        name: { type: string }
+        definition:
+          type: object
+          required: [steps]
+          properties:
+            steps:
+              type: array
+              items:
+                type: object
+                required: [name, type]
+                properties:
+                  id: { type: string }
+                  name: { type: string }
+                  type:
+                    type: string
+                    enum: [worker, http, delay, transform, webhook]
+                  config: { type: object, additionalProperties: true }
+                  dependsOn:
+                    type: array
+                    items: { type: string }
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
