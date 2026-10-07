@@ -1,0 +1,85 @@
+{
+  "scenario": "retry-and-timeout",
+  "startedAt": "2026-10-05T13:50:09.571Z",
+  "workerStoppedAt": null,
+  "api": "http://localhost:3000",
+  "execution": {
+    "id": "ca7a467e-8da4-44ed-8ba3-5b5fd4f6e923",
+    "workflowId": "25fdad0e-4eb7-436d-8573-4cfca798ffcb",
+    "status": "FAILED",
+    "idempotencyKey": "failure-d8fed0f2-c812-4008-b771-c4e0685ea770",
+    "error": "Execution blocked by failed dependency",
+    "createdAt": "2026-10-05T13:48:33.034Z",
+    "startedAt": "2026-10-05T13:48:33.304Z",
+    "completedAt": "2026-10-05T13:50:09.524Z",
+    "input": {
+      "scenario": "retry-and-timeout"
+    },
+    "output": {
+      "recover": {
+        "attempt": 3,
+        "recovered": true
+      }
+    }
+  },
+  "jobs": [
+    {
+      "id": "9a58d02d-c2a0-4740-820b-645dedbb2ffe",
+      "executionId": "ca7a467e-8da4-44ed-8ba3-5b5fd4f6e923",
+      "stepId": "recover",
+      "stepName": "recover",
+      "stepType": "test-failure",
+      "stepConfig": {
+        "failures": 2
+      },
+      "stepOrder": 0,
+      "status": "COMPLETED",
+      "attempts": 3,
+      "error": "Configured test failure on attempt 2",
+      "startedAt": "2026-10-05T13:48:33.308Z",
+      "completedAt": "2026-10-05T13:48:36.356Z",
+      "input": {
+        "scenario": "retry-and-timeout"
+      },
+      "output": {
+        "attempt": 3,
+        "recovered": true
+      },
+      "errorCode": "HANDLER_ERROR"
+    },
+    {
+      "id": "7b9b1d87-e09f-4050-b68f-0ea4bb7a118a",
+      "executionId": "ca7a467e-8da4-44ed-8ba3-5b5fd4f6e923",
+      "stepId": "timeout",
+      "stepName": "timeout",
+      "stepType": "delay",
+      "stepConfig": {
+        "ms": 31000
+      },
+      "stepOrder": 1,
+      "status": "FAILED",
+      "attempts": 3,
+      "error": "delay timed out",
+      "startedAt": "2026-10-05T13:48:36.359Z",
+      "completedAt": "2026-10-05T13:50:09.503Z",
+      "input": {
+        "attempt": 3,
+        "scenario": "retry-and-timeout",
+        "recovered": true
+      },
+      "output": null,
+      "errorCode": "TIMEOUT"
+    }
+  ],
+  "history": [
+    {
+      "id": "66b33fcb-ee2d-45a1-8e02-19e8485e87f6",
+      "event_type": "EXECUTION_QUEUED",
+      "payload": {
+        "workflowId": "25fdad0e-4eb7-436d-8573-4cfca798ffcb",
+        "idempotencyKey": "failure-d8fed0f2-c812-4008-b771-c4e0685ea770"
+      },
+      "created_at": "2026-10-05T13:48:33.039Z"
+    }
+  ]
+}
