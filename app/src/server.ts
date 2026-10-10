@@ -1,20 +1,14 @@
-import 'dotenv/config';
+import { app } from './app.js';
+import { config } from './infra/config.js';
+import { runMigrations } from './infra/db.js';
+import { log } from './infra/log.js';
+import { isQueueEnabled } from './infra/queue.js';
 
-import app from './app.js';
-import { getAuthConfig } from './config/auth.config.js';
-import { runMigrations } from './db/migrations.js';
+if (config.auth.secret.length < 32) throw new Error('AUTH_TOKEN_SECRET must be at least 32 characters');
 
-const PORT = process.env.PORT || 3000;
+await runMigrations();
+const server = app.listen(config.port, () => {
+  log('api.started', { port: config.port, queue: isQueueEnabled() ? 'sqs' : 'postgres-polling' });
+});
 
-getAuthConfig();
-
-runMigrations()
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log(`Server is running on port ${PORT}`);
-    });
-  })
-  .catch((error: unknown) => {
-    console.error('Database migration failed', error);
-    process.exitCode = 1;
-  });
+process.on('SIGTERM', () => server.close());
