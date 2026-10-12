@@ -2,24 +2,26 @@
   "family": "flowforge-worker",
   "requiresCompatibilities": ["FARGATE"],
   "networkMode": "awsvpc",
-  "cpu": "256",
-  "memory": "512",
+  "cpu": "512",
+  "memory": "1024",
   "executionRoleArn": "arn:aws:iam::<account-id>:role/ecsTaskExecutionRole",
   "taskRoleArn": "arn:aws:iam::<account-id>:role/flowforge-worker-task-role",
   "containerDefinitions": [
     {
       "name": "flowforge-worker",
-      "image": "<account-id>.dkr.ecr.<region>.amazonaws.com/flowforge-worker:<tag>",
+      "image": "replaced-by-ci",
       "essential": true,
+      "command": ["node", "dist/worker.js"],
+      "stopTimeout": 30,
       "environment": [
-        { "name": "NODE_ENV", "value": "production" },
         { "name": "AWS_REGION", "value": "<region>" },
-        { "name": "SQS_QUEUE_URL", "value": "https://sqs.<region>.amazonaws.com/<account-id>/flowforge-executions" }
+        { "name": "SQS_QUEUE_URL", "value": "https://sqs.<region>.amazonaws.com/<account-id>/flowforge-executions" },
+        { "name": "WORKER_CONCURRENCY", "value": "10" },
+        { "name": "DATABASE_POOL_SIZE", "value": "15" }
       ],
       "secrets": [
-        { "name": "DATABASE_URL", "valueFrom": "<secrets-manager-database-url-arn>" },
-        { "name": "REDIS_URL", "valueFrom": "<secrets-manager-redis-url-arn>" },
-        { "name": "AUTH_TOKEN_SECRET", "valueFrom": "<secrets-manager-auth-secret-arn>" }
+        { "name": "DATABASE_URL", "valueFrom": "<secrets-manager-arn>:DATABASE_URL::" },
+        { "name": "REDIS_URL", "valueFrom": "<secrets-manager-arn>:REDIS_URL::" }
       ],
       "logConfiguration": {
         "logDriver": "awslogs",
