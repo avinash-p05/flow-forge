@@ -1,0 +1,362 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "FlowForge Runtime Architecture",
+    "subtitle": "API-led workflow execution with PostgreSQL truth, Redis rate limiting, and queue-backed workers",
+    "output": "flowforge-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/avinash-p05/flow-forge.git",
+      "provider": "github",
+      "link_mode": "local-only",
+      "revision": "12909e87633c62b8bd5499a55e223c0c4b3db762"
+    }
+  },
+  "components": [
+    {
+      "id": "client",
+      "type": "external",
+      "label": "API Clients",
+      "sublabel": "HTTP / JSON",
+      "pos": [
+        40,
+        300
+      ],
+      "size": [
+        140,
+        64
+      ],
+      "sources": [
+        {
+          "path": "app/src/app.ts",
+          "line": 24,
+          "end_line": 27,
+          "label": "HTTP routes"
+        }
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "FlowForge API",
+      "sublabel": "Express :3000",
+      "pos": [
+        250,
+        300
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "sources": [
+        {
+          "path": "app/src/server.ts",
+          "line": 1,
+          "end_line": 14,
+          "label": "Server startup"
+        },
+        {
+          "path": "app/src/app.ts",
+          "line": 1,
+          "end_line": 36,
+          "label": "Express app"
+        }
+      ]
+    },
+    {
+      "id": "auth",
+      "type": "security",
+      "label": "Auth Middleware",
+      "sublabel": "scrypt + JWT",
+      "pos": [
+        250,
+        130
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "Bearer tokens",
+      "sources": [
+        {
+          "path": "app/src/api/auth.ts",
+          "line": 1,
+          "end_line": 83,
+          "label": "Password + JWT"
+        }
+      ]
+    },
+    {
+      "id": "postgres",
+      "type": "database",
+      "label": "PostgreSQL",
+      "sublabel": "users, workflows, jobs",
+      "pos": [
+        540,
+        300
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "sources": [
+        {
+          "path": "app/src/infra/db.ts",
+          "line": 1,
+          "end_line": 45,
+          "label": "Pool + migrations"
+        },
+        {
+          "path": "app/migrations/001_schema.sql",
+          "line": 1,
+          "end_line": 100,
+          "label": "Durable state"
+        }
+      ]
+    },
+    {
+      "id": "redis",
+      "type": "database",
+      "label": "Redis",
+      "sublabel": "optional rate-limit store",
+      "pos": [
+        490,
+        130
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "sources": [
+        {
+          "path": "app/src/infra/redis.ts",
+          "line": 1,
+          "end_line": 8,
+          "label": "Redis client"
+        },
+        {
+          "path": "app/src/api/rate-limit.ts",
+          "line": 1,
+          "end_line": 32,
+          "label": "Rate limiting"
+        }
+      ]
+    },
+    {
+      "id": "queue",
+      "type": "messagebus",
+      "label": "SQS / ElasticMQ",
+      "sublabel": "execution-ready messages",
+      "pos": [
+        760,
+        130
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "app/src/infra/queue.ts",
+          "line": 1,
+          "end_line": 58,
+          "label": "Queue adapter"
+        },
+        {
+          "path": "docker-compose.yml",
+          "line": 40,
+          "end_line": 43,
+          "label": "Local broker"
+        }
+      ]
+    },
+    {
+      "id": "worker",
+      "type": "backend",
+      "label": "Worker Fleet",
+      "sublabel": "leased execution slots",
+      "pos": [
+        823,
+        300
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "tag": "scale-out",
+      "sources": [
+        {
+          "path": "app/src/worker.ts",
+          "line": 1,
+          "end_line": 38,
+          "label": "Worker process"
+        },
+        {
+          "path": "app/src/engine/executor.ts",
+          "line": 1,
+          "end_line": 120,
+          "label": "Worker loop"
+        },
+        {
+          "path": "app/src/engine/job-store.ts",
+          "line": 1,
+          "end_line": 279,
+          "label": "Leases, retries, DLQ"
+        }
+      ]
+    },
+    {
+      "id": "downstream",
+      "type": "external",
+      "label": "External Services",
+      "sublabel": "called by http steps",
+      "pos": [
+        1100,
+        300
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "app/src/engine/handlers.ts",
+          "line": 1,
+          "end_line": 102,
+          "label": "Step handlers"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Docker Compose runtime",
+      "wraps": [
+        "api",
+        "auth",
+        "postgres",
+        "redis",
+        "queue",
+        "worker"
+      ],
+      "pad": 28
+    }
+  ],
+  "connections": [
+    {
+      "id": "client-api",
+      "from": "client",
+      "to": "api",
+      "label": "REST requests",
+      "variant": "emphasis"
+    },
+    {
+      "id": "auth-api",
+      "from": "auth",
+      "to": "api",
+      "label": "protect routes",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 58
+    },
+    {
+      "id": "api-postgres",
+      "from": "api",
+      "to": "postgres",
+      "label": "read / write state"
+    },
+    {
+      "id": "api-redis",
+      "from": "api",
+      "to": "redis",
+      "label": "rate-limit counters",
+      "variant": "dashed"
+    },
+    {
+      "id": "api-queue",
+      "from": "api",
+      "to": "queue",
+      "label": "enqueue execution",
+      "variant": "dashed"
+    },
+    {
+      "id": "queue-worker",
+      "from": "queue",
+      "to": "worker",
+      "label": "long-poll / ack",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 58
+    },
+    {
+      "id": "worker-postgres",
+      "from": "worker",
+      "to": "postgres",
+      "label": "claim, lease, settle",
+      "variant": "emphasis"
+    },
+    {
+      "id": "worker-downstream",
+      "from": "worker",
+      "to": "downstream",
+      "label": "http step calls",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Control plane",
+      "items": [
+        "Express routes expose auth, workflow, execution, and health operations",
+        "Bearer JWT middleware protects workflow and execution APIs"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Durable execution",
+      "items": [
+        "PostgreSQL remains the source of truth for executions and jobs",
+        "Workers claim leases, retry jobs, and settle terminal execution state"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Resilience",
+      "items": [
+        "SQS is optional; workers fall back to PostgreSQL polling",
+        "Redis is optional and used for rate-limit counters",
+        "Queue redelivery and database sweeping recover lost work"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Dead-letter queues",
+      "items": [
+        "Jobs that exhaust retries (exponential backoff + jitter) land in dead_letter_jobs and can be replayed via the API",
+        "Messages that fail 5 receives move to the SQS dead-letter queue (redrive policy)"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Load test results",
+      "items": [
+        "2,000 executions × 5-step DAG = 10,000 jobs: 10,000 / 10,000 completed, 0 failed",
+        "50 live workers at peak (5 containers × 10 slots), 49 busy at once",
+        "~950 jobs/s · job p95 38 ms · execution end-to-end p95 236 ms"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "Failure-injection results",
+      "items": [
+        "4,000 jobs, 30% of attempts fail on purpose, 2 of 5 worker containers SIGKILLed twice mid-run",
+        "99.41% of affected jobs recovered (1,171 / 1,178); 20 / 20 crash-lost jobs recovered",
+        "0 jobs committed twice; 99.3% of executions succeeded, the rest dead-lettered"
+      ]
+    }
+  ]
+}

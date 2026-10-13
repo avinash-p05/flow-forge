@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "ok": false,
+  "command": "finalize",
+  "status": "fail",
+  "type": "architecture",
+  "quality": "showcase",
+  "specification": {
+    "path": "D:\\FlowForge\\.archify\\architecture-flowforge-20261013-1714\\candidate.json",
+    "sha256": "92a43815defe4fee01fec48559e986938e386c8e418976c929e339d0ec430a45",
+    "bytes": 6228
+  },
+  "artifact": {
+    "path": "D:\\FlowForge\\.archify\\architecture-flowforge-20261013-1714\\flowforge-architecture.html",
+    "sha256": "005508f0045900126a53e43cd5fdd82c10ff7272cd9092e46f8f5fb3d73ae4ac",
+    "bytes": 762738
+  },
+  "gates": {
+    "validate": "fail",
+    "deliver": "not-run",
+    "check": "not-run",
+    "browser-check": "not-run"
+  },
+  "failedStage": "validate",
+  "diagnostics": [
+    {
+      "code": "composition/label-route-clearance",
+      "severity": "error",
+      "message": "[composition/label-route-clearance] showcase architecture label \"claim, lease, settle\" on connections[6] id \"worker-postgres\" \"worker\" -> \"postgres\" label \"claim, lease, settle\" is 0px from connections[5] id \"queue-worker\" \"queue\" -> \"worker\" label \"long-poll / ack\" segment 2 [757, 568] -> [757, 276] (label rect [709, 312, 106, 14]; minimum 4px) — if the authored fromSide/toSide/labelDy are not required by the user, remove them so the renderer can re-plan; otherwise preserve that intent and adjust labelAt, labelDx, labelDy, or labelSegment; otherwise adjust the other relationship route/via/channel.",
+      "subject": {
+        "diagramType": "architecture",
+        "collection": "connections",
+        "index": 6,
+        "id": "worker-postgres",
+        "from": "worker",
+        "to": "postgres"
+      },
+      "evidence": {
+        "label": "claim, lease, settle",
+        "otherRelationship": {
+          "diagramType": "architecture",
+          "collection": "connections",
+          "index": 5,
+          "id": "queue-worker",
+          "from": "queue",
+          "to": "worker"
+        },
+        "segmentIndex": 2,
+        "clearancePx": 0,
+        "minimumPx": 4,
+        "labelRect": {
+          "relation": {
+            "id": "worker-postgres",
+            "from": "worker",
+            "to": "postgres",
+            "label": "claim, lease, settle",
+            "variant": "emphasis"
+          },
+          "relationIndex": 6,
+          "label": "claim, lease, settle",
+          "x": 708.5,
+          "y": 312,
+          "width": 106,
+          "height": 14,
+          "lx": 761.5,
+          "ly": 322
+        },
+        "from": [
+          757,
+          568
+        ],
+        "to": [
+          757,
+          276
+        ]
+      },
+      "supportedFixes": [
+        "if the authored fromSide/toSide/labelDy are not required by the user, remove them so the renderer can re-plan; otherwise preserve that intent and adjust labelAt, labelDx, labelDy, or labelSegment; otherwise adjust the other relationship route/via/channel"
+      ]
+    }
+  ],
+  "diagnosticSummary": {
+    "total": 1,
+    "shown": 1,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "D:\\FlowForge\\.archify\\architecture-flowforge-20261013-1714\\review-2\\flowforge-architecture.finalize.json",
+    "summaryReceipt": "D:\\FlowForge\\.archify\\architecture-flowforge-20261013-1714\\review-2\\flowforge-architecture.finalize-summary.json"
+  },
+  "update": {
+    "status": "current",
+    "installedVersion": "3.0.1",
+    "availableVersion": "3.0.1",
+    "releaseNotes": null,
+    "checkedAt": "2026-10-13T11:47:18.973Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  },
+  "visualReview": "not-requested",
+  "durationMs": 1226,
+  "nextAction": {
+    "action": "edit-in-place",
+    "candidate": "D:\\FlowForge\\.archify\\architecture-flowforge-20261013-1714\\candidate.json",
+    "constraint": "Preserve all semantics and user-fixed geometry. Use references/architecture-layout-repair.md to choose a local repair or connected-scene reflow; edit the existing candidate.",
+    "then": "finalize-once"
+  }
+}
