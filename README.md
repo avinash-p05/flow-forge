@@ -1,331 +1,179 @@
-# FlowForge
+# FlowForge — Distributed Workflow Engine
 
-FlowForge is a distributed workflow execution platform. It provides a REST API for defining workflows, queues workflow executions, and processes runtime jobs through horizontally scalable workers.
+FlowForge runs multi-step workflows (DAGs of jobs) on a pool of horizontally scalable workers.
+An API accepts workflow runs and puts them on **AWS SQS**. Workers pull them, run each step when its
+dependencies are done, retry failures with **exponential backoff**, move permanently failing jobs to a
+**dead-letter queue**, and record every state change in **PostgreSQL**. **Redis** provides rate limiting
+shared by all API instances.
 
-## Features
+**Stack:** TypeScript · Node.js · Express · PostgreSQL · Redis · AWS SQS · Docker · GitHub Actions · AWS ECS Fargate
 
-- JWT authentication with rotating refresh tokens
-- PostgreSQL-backed workflow and execution persistence
-- Server-generated stable step IDs
-- Dependency-aware workflow scheduling
-- Runtime job records for every workflow step
-- Retry and exponential backoff
-- PostgreSQL dead-letter records
-- AWS SQS execution queue support
-- SQS visibility-timeout heartbeats
-- Redis-backed rate limiting and workflow-definition caching
-- Built-in step handlers:
-  - `worker`
-  - `http`
-  - `webhook`
-  - `delay`
-  - `transform`
-- Execution input and output persistence
-- Audit history and operational metrics
-- API and worker Docker images
-- ECS task definitions and IAM policy examples
-- Postman collection and OpenAPI documentation
+Architecture diagram: [flowforge-architecture.html](flowforge-architecture.html) (published with GitHub Pages)
 
-## Repository structure
+## Measured results
 
-```text
-.
-├── frontend/
-│   ├── src/                  # React workflow control center
-│   ├── package.json
-│   └── vite.config.ts
-├── deploy/
-│   ├── ecs/                  # ECS task definitions
-│   └── iam/                  # IAM policy examples
-├── docs/
-│   └── openapi.yaml          # REST API contract
-├── postman/
-│   └── FlowForge.postman_collection.json
-├── app/
-│   ├── migrations/           # Ordered PostgreSQL migrations
-│   ├── scripts/              # Smoke tests and utility scripts
-│   ├── src/
-│   │   ├── config/           # Validated runtime configuration
-│   │   ├── controllers/      # HTTP request/response handling
-│   │   ├── db/               # PostgreSQL pool and migration runner
-│   │   ├── handlers/         # Built-in workflow step handlers
-│   │   ├── infrastructure/  # Redis and other infrastructure clients
-│   │   ├── middleware/       # Authentication and rate limiting
-│   │   ├── queue/            # SQS queue adapter
-│   │   ├── repositories/     # PostgreSQL data access
-│   │   ├── routes/           # Express route registration
-│   │   ├── services/         # Business logic
-│   │   ├── types/            # Domain types
-│   │   ├── utils/            # Shared utilities
-│   │   ├── app.ts            # Express application
-│   │   ├── server.ts         # API process entry point
-│   │   └── worker.ts         # Worker process entry point
-│   ├── Dockerfile.api
-│   ├── Dockerfile.worker
-│   └── .env.example
-├── docker-compose.yml
-├── architecture.md
-└── README.md
+Both tests run against the full Docker stack (5 worker containers × 10 slots = 50 workers) and compute
+their numbers from the timestamps stored in PostgreSQL. Raw output: [docs/results/](docs/results/).
+
+| Load test ([load-test.ts](app/scripts/load-test.ts)) | |
+|---|---|
+| Workload | 2,000 executions of a 5-step fan-out/fan-in workflow = **10,000 jobs** |
+| Result | 10,000 / 10,000 jobs completed, 0 failed |
+| Concurrent workers | **50 live**, 49 busy at peak |
+| Throughput | ~950 jobs/s (10.5 s wall clock) |
+| Latency | job p95 38 ms · execution end-to-end p95 236 ms · queue wait p95 139 ms |
+
+| Failure-injection test ([failure-test.ts](app/scripts/failure-test.ts)) | |
+|---|---|
+| Workload | 1,000 executions × 4 steps = 4,000 jobs |
+| Injected failures | every attempt fails with 30% probability, **and** 2 of 5 worker containers are SIGKILLed twice mid-run |
+| Jobs that hit ≥1 failure or crash | 1,178 |
+| Of those, recovered and completed | 1,171 → **99.41% recovery** |
+| Jobs lost to a killed worker | 20, all 20 recovered (100%) |
+| Jobs committed twice | 0 |
+| Execution success rate | 99.3% (the 7 jobs that failed all 5 attempts went to the dead-letter queue) |
+
+## How it works
+
+```
+ client ──HTTP──▶ API (Express) ──INSERT──▶ PostgreSQL  ◀──── source of truth for all state
+                    │   │                        ▲
+       rate limit ──┘   └──SendMessage──▶ SQS ───┘ ReceiveMessage
+          (Redis)                         │
+                                          ▼
+                                  Workers (N containers × M slots)
+                                  claim execution (lease) → run ready jobs → retry / DLQ
 ```
 
-## Prerequisites
+1. **Submit** — `POST /api/v1/workflows/:id/executions` creates one `executions` row and one `jobs` row per
+   step in a single transaction, then sends `{ executionId }` to SQS. The `Idempotency-Key` header makes
+   this safe to retry.
+2. **Claim** — a worker slot receives the message and takes a **lease** on the execution with one conditional
+   `UPDATE` (`locked_by`, `locked_until`). Only one worker can hold the lease; it renews it with a heartbeat.
+3. **Run** — the worker repeatedly claims every job whose dependencies are `COMPLETED`, runs them in parallel,
+   and passes each job the outputs of the steps it depends on.
+4. **Fail** — a failed job is retried after `base × 2^(attempt-1)` (+ jitter). After `maxAttempts`, or on a
+   non-retryable error, it is marked `FAILED`, written to `dead_letter_jobs`, and its dependents are `SKIPPED`.
+5. **Wait** — when the remaining jobs are only waiting for a retry, the execution goes back to `QUEUED` with
+   `next_attempt_at` set, the lease is released, and the SQS message is hidden until that time.
+6. **Crash** — if a worker dies, its lease expires. Another worker takes over (via SQS redelivery or the
+   PostgreSQL sweep), marks the dead worker's attempts `LOST`, and re-runs those jobs.
 
-- Node.js 20+
-- npm
-- Docker Desktop for local PostgreSQL, Redis, and container validation
-- PostgreSQL and Redis if running the server directly
-- AWS credentials and an SQS queue for production queue mode
+## Code map
 
-## Local setup
-
-Install dependencies:
-
-```powershell
-cd D:\FlowForge\frontend
-npm ci
-
-cd D:\FlowForge\app
-npm ci
+```
+app/
+├── migrations/001_schema.sql     tables: users, workflows, executions, jobs, job_attempts, dead_letter_jobs, workers
+├── src/
+│   ├── server.ts                 API entry point
+│   ├── worker.ts                 worker entry point (WORKER_CONCURRENCY slots, graceful shutdown)
+│   ├── app.ts                    Express app: request logging, routes, error handler
+│   ├── infra/                    connections to the outside world
+│   │   ├── config.ts             every environment variable in one place (+ loads .env.local in dev)
+│   │   ├── db.ts                 PostgreSQL pool, transactions, migration runner
+│   │   ├── redis.ts              Redis client
+│   │   ├── queue.ts              SQS adapter (send, receive, delete, change visibility)
+│   │   └── log.ts                structured JSON logs
+│   ├── api/
+│   │   ├── auth.ts               register/login, scrypt password hashing, JWT middleware
+│   │   ├── rate-limit.ts         Redis fixed-window limiter
+│   │   ├── workflows.ts          create/list/get/delete workflows
+│   │   ├── executions.ts         idempotent submit, status, cancel, dead letters + replay
+│   │   └── metrics.ts            /health and /metrics
+│   └── engine/
+│       ├── rules.ts              DAG validation (cycle detection) and backoff formula
+│       ├── handlers.ts           step types: http, delay, transform, flaky; timeouts
+│       ├── job-store.ts          every SQL statement the worker runs (leases, fencing, retries, DLQ)
+│       └── executor.ts           the worker loop
+├── test/                         unit tests (node:test)
+├── scripts/                      e2e-test.ts, load-test.ts, failure-test.ts
+└── .env.example                  template for .env.local (local dev only; never used in Docker or AWS)
+deploy/
+├── local/elasticmq.conf          local SQS queue + its dead-letter queue (used by docker-compose.yml)
+├── aws/ecs/                      ECS task definitions (used by the CD job in ci.yml)
+└── aws/iam/                      least-privilege IAM policies for the API and worker task roles
+.github/workflows/ci.yml          CI (typecheck, unit + e2e tests) and CD (ECR push + ECS deploy)
 ```
 
-Create the local environment file:
+## Run it locally
 
-```powershell
-Copy-Item .env.example .env
+Requires Docker and Node.js 22.
+
+```bash
+docker compose up -d --build --scale worker=5    # Postgres, Redis, SQS (ElasticMQ), API, 5 workers × 10 slots
+cd app && npm install
+npm test                 # unit tests
+npm run test:e2e         # every feature through the API
 ```
 
-Set a unique local `AUTH_TOKEN_SECRET` with at least 32 characters. Never commit `.env`.
+Load and failure tests need a higher rate limit (one test user submits thousands of runs):
 
-Start the local dependencies:
+```bash
+RATE_LIMIT_MAX_REQUESTS=100000 docker compose up -d --build --scale worker=5
+npm run test:load
 
-```powershell
-docker compose up -d postgres redis
+EXECUTION_LEASE_MS=10000 RATE_LIMIT_MAX_REQUESTS=100000 docker compose up -d --build --scale worker=5
+npm run test:failure
 ```
 
-Start the API:
+Try it by hand:
 
-```powershell
-cd app
-npm start
+```bash
+TOKEN=$(curl -s localhost:3000/api/v1/auth/register -H 'content-type: application/json' \
+  -d '{"email":"me@example.com","password":"password-123"}' | jq -r .token)
+
+WF=$(curl -s localhost:3000/api/v1/workflows -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{
+  "name": "order",
+  "definition": { "steps": [
+    { "id": "load",   "type": "transform", "config": { "values": { "loaded": true } } },
+    { "id": "charge", "type": "flaky",     "config": { "failUntilAttempt": 2 }, "dependsOn": ["load"] },
+    { "id": "ship",   "type": "delay",     "config": { "ms": 500 },             "dependsOn": ["charge"] }
+  ] } }' | jq -r .id)
+
+EX=$(curl -s localhost:3000/api/v1/workflows/$WF/executions -H "authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' -H 'idempotency-key: order-1' -d '{"input":{"orderId":1}}' | jq -r .id)
+
+curl -s localhost:3000/api/v1/executions/$EX -H "authorization: Bearer $TOKEN" | jq
+curl -s localhost:3000/metrics | jq
 ```
 
-Start a worker in a second terminal:
+## API
 
-```powershell
-cd app
-npm run worker
-```
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/api/v1/auth/register`, `/api/v1/auth/login` | returns a JWT |
+| POST/GET | `/api/v1/workflows` | create (validated DAG) / list |
+| GET/DELETE | `/api/v1/workflows/:id` | |
+| POST | `/api/v1/workflows/:id/executions` | rate-limited; `Idempotency-Key` header; 202 new, 200 replay |
+| GET | `/api/v1/executions/:id` | execution with all its jobs |
+| POST | `/api/v1/executions/:id/cancel` | |
+| GET | `/api/v1/dead-letters` | jobs that exhausted their retries |
+| POST | `/api/v1/dead-letters/:jobId/replay` | re-run a dead-lettered job and its skipped dependents |
+| GET | `/health` | checks PostgreSQL and Redis |
+| GET | `/metrics` | throughput, latency percentiles, failures, DLQ size, live/busy workers |
 
-The API is available at `http://localhost:3000`.
+Step types: `http` (5xx/429 retried, 4xx not; sends an `Idempotency-Key` header), `delay`, `transform`,
+`flaky` (failure injection). Per-step `config.maxAttempts` and `config.timeoutMs` override the defaults.
 
-## GitHub Pages architecture diagram
+## Deploying to AWS
 
-The standalone architecture diagram is deployed automatically by
-`.github/workflows/pages.yml` whenever `flowforge-architecture.html` changes
-on `main` or `master`. After enabling GitHub Pages for the repository with
-**Source: GitHub Actions**, it is available at:
+Step-by-step commands for creating everything, testing on AWS and tearing it down: **[docs/aws-deployment.md](docs/aws-deployment.md)**.
 
-```text
-https://avinash-p05.github.io/flow-forge/
-https://avinash-p05.github.io/flow-forge/flowforge-architecture.html
-```
+- **Compute:** one image, two ECS Fargate services — `flowforge-api` behind an Application Load Balancer
+  (health check `/health`) and `flowforge-worker` (command `node dist/worker.js`). Task definitions: [deploy/aws/ecs/](deploy/aws/ecs/).
+- **Data:** RDS PostgreSQL, ElastiCache Redis, secrets in Secrets Manager.
+- **Queue:** `flowforge-executions` with a redrive policy to `flowforge-executions-dlq` (maxReceiveCount 5):
+  ```bash
+  aws sqs create-queue --queue-name flowforge-executions-dlq
+  aws sqs create-queue --queue-name flowforge-executions --attributes '{
+    "VisibilityTimeout":"30","ReceiveMessageWaitTimeSeconds":"20",
+    "RedrivePolicy":"{\"deadLetterTargetArn\":\"arn:aws:sqs:<region>:<account-id>:flowforge-executions-dlq\",\"maxReceiveCount\":\"5\"}"}'
+  ```
+- **Permissions:** least-privilege task roles in [deploy/aws/iam/](deploy/aws/iam/) (API can only send, workers can only receive/delete/change visibility).
+- **CI/CD:** [ci.yml](.github/workflows/ci.yml) typechecks and runs unit + end-to-end tests on every push and PR.
+  On `master` it builds the image, pushes it to ECR and rolls both ECS services, waiting until they are healthy.
+  It authenticates with GitHub OIDC, so no AWS keys are stored in GitHub.
+- **Observability:** JSON logs go to CloudWatch Logs (`/ecs/flowforge`); `/metrics` reports system-wide numbers from PostgreSQL;
+  scale workers on the SQS `ApproximateNumberOfMessagesVisible` metric.
 
-Build the frontend and serve it from the same Express process:
-
-```powershell
-cd D:\FlowForge\frontend
-npm run build
-
-cd ..\server
-npm start
-```
-
-Once built, `http://localhost:3000/` serves the React application and the API remains available on the same port. During frontend-only development, use `npm run dev` in `frontend`; Vite proxies API requests to port 3000.
-
-Health check:
-
-```http
-GET http://localhost:3000/api/v1/health
-```
-
-## Run the complete local stack
-
-The Compose file starts PostgreSQL, Redis, the API, and a worker:
-
-```powershell
-docker compose up --build --wait
-```
-
-Stop the stack:
-
-```powershell
-docker compose down
-```
-
-Add `-v` only when you intentionally want to remove local database and Redis volumes.
-
-## Configuration
-
-The complete configuration reference is in [app/.env.example](app/.env.example).
-
-Important settings:
-
-```env
-PORT=3000
-DATABASE_URL=postgresql://flowforge:flowforge@127.0.0.1:5433/flowforge
-REDIS_URL=redis://localhost:6379
-AUTH_TOKEN_SECRET=replace-with-at-least-32-random-characters
-JOB_MAX_ATTEMPTS=3
-JOB_RETRY_BASE_DELAY_MS=1000
-JOB_TIMEOUT_MS=30000
-SQS_QUEUE_URL=
-```
-
-When `SQS_QUEUE_URL` is empty, workers use PostgreSQL polling. When it is configured, workers consume execution messages from SQS.
-
-## Workflow example
-
-Create a workflow without supplying step IDs:
-
-```http
-POST /workflows
-Authorization: Bearer <access-token>
-Content-Type: application/json
-```
-
-```json
-{
-  "name": "Customer onboarding",
-  "definition": {
-    "steps": [
-      {
-        "name": "Prepare customer",
-        "type": "transform",
-        "config": {
-          "operation": "set",
-          "key": "status",
-          "value": "prepared"
-        }
-      },
-      {
-        "name": "Notify customer",
-        "type": "webhook",
-        "dependsOn": ["<generated-step-id>"],
-        "config": {
-          "method": "POST",
-          "url": "https://example.com/webhook"
-        }
-      }
-    ]
-  }
-}
-```
-
-The API generates a UUID for any omitted step ID. Dependencies must reference step IDs, not display names. Duplicate display names are allowed; duplicate step IDs are rejected.
-
-Submit an execution:
-
-```http
-POST /workflows/<workflow-id>/executions
-Authorization: Bearer <access-token>
-Idempotency-Key: onboarding-customer-123
-Content-Type: application/json
-```
-
-```json
-{
-  "input": {
-    "customerId": "customer-123"
-  }
-}
-```
-
-Execution input and completed dependency outputs are provided to subsequent jobs. Execution status, job status, output, retries, and audit events can be queried through the execution endpoints.
-
-## Step handlers
-
-Handlers are built-in and selected by the step `type`. FlowForge does not execute arbitrary user-supplied JavaScript.
-
-| Type | Current behavior |
-| --- | --- |
-| `worker` | Returns configured result and input through the built-in worker contract |
-| `http` | Performs an outbound HTTP request and returns status/body |
-| `webhook` | Uses the HTTP handler contract |
-| `delay` | Waits for a configured duration |
-| `transform` | Supports merge, pick, and set operations |
-
-## API documentation and testing
-
-- OpenAPI contract: [docs/openapi.yaml](docs/openapi.yaml)
-- Postman collection: [postman/FlowForge.postman_collection.json](postman/FlowForge.postman_collection.json)
-
-Import the Postman collection, run **Register** or **Login**, then run the workflow and execution requests. Collection scripts save access tokens, refresh tokens, workflow IDs, and execution IDs automatically.
-
-## Validation commands
-
-Run the TypeScript check:
-
-```powershell
-cd app
-npx tsc --noEmit
-```
-
-Run handler tests:
-
-```powershell
-npm test
-```
-
-Run the API smoke test against a running API:
-
-```powershell
-$env:API_URL = "http://localhost:3000"
-npm run smoke
-```
-
-Validate Compose:
-
-```powershell
-cd ..
-docker compose config
-```
-
-Build production-style images:
-
-```powershell
-docker build -f app/Dockerfile.api -t flowforge-api:local app
-docker build -f app/Dockerfile.worker -t flowforge-worker:local app
-```
-
-## Deployment
-
-The repository includes deployment starting points:
-
-- [deploy/ecs/api-task-definition.json](deploy/ecs/api-task-definition.json)
-- [deploy/ecs/worker-task-definition.json](deploy/ecs/worker-task-definition.json)
-- [deploy/iam/flowforge-api-policy.json](deploy/iam/flowforge-api-policy.json)
-- [deploy/iam/flowforge-worker-policy.json](deploy/iam/flowforge-worker-policy.json)
-
-Before deploying, replace placeholders and configure:
-
-- ECR repositories and image tags
-- ECS execution and task roles
-- Secrets Manager values
-- SQS queue and redrive policy
-- RDS PostgreSQL
-- ElastiCache Redis
-- CloudWatch log groups and alarms
-- Load balancer and TLS
-
-Do not use the Compose placeholder secret in production.
-
-## CI
-
-The GitHub Actions workflow in [.github/workflows/ci.yml](.github/workflows/ci.yml) runs TypeScript validation, starts local dependencies, performs health and smoke checks, validates Compose, and builds API and worker images.
-
-## Current limitations
-
-- Metrics are process-local counters; use Prometheus or a shared metrics backend for multi-instance aggregation.
-- Complete AWS infrastructure is not managed as Terraform, CDK, or CloudFormation.
-- Full PostgreSQL/SQS integration tests are still separate from the focused handler tests.
-- Outbound HTTP handlers should be protected with an allowlist or SSRF-safe egress policy in production.
+Design decisions and trade-offs: [docs/design-notes.md](docs/design-notes.md).
