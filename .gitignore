@@ -1,24 +1,9 @@
-# Dependencies
-server/node_modules/
-app/node_modules/
-app/src/client/node_modules/
-
-# Local environment files
-server/.env
-server/.env.*
-!server/.env.example
+node_modules/
+app/dist/
 app/.env
 app/.env.*
 !app/.env.example
-
-# Build and test output
-server/dist/
-server/coverage/
-
-# Logs and runtime files
 *.log
-*.pid
-
-# Local development files
 .DS_Store
 Thumbs.db
+.aws-tmp/

@@ -1,29 +1,21 @@
 {
-  "name": "server",
-  "version": "1.0.0",
-  "description": "",
-  "main": "src/server.ts",
-  "scripts": {
-    "start": "node --loader ts-node/esm src/server.ts",
-    "worker": "node --loader ts-node/esm src/worker.ts",
-    "test": "node --loader ts-node/esm --test test/handlers.test.ts",
-    "dev": "nodemon --exec \"node --loader ts-node/esm\" src/server.ts",
-    "db:up": "docker compose -f ../docker-compose.yml up -d postgres redis",
-    "db:down": "docker compose -f ../docker-compose.yml down",
-    "smoke": "node scripts/smoke-test.mjs"
-    ,"typecheck": "tsc --noEmit",
-    "typecheck:scripts": "tsc -p tsconfig.scripts.json",
-    "benchmark:generate": "node --loader ts-node/esm scripts/benchmark/generate-workflows.ts",
-    "benchmark:run": "node --loader ts-node/esm scripts/benchmark/run-benchmark.ts",
-    "benchmark:collect": "node --loader ts-node/esm scripts/benchmark/collect-results.ts",
-    "benchmark:report": "node --loader ts-node/esm scripts/benchmark/report.ts",
-    "failure:test": "node --loader ts-node/esm failure-injection.ts"
-    ,"test:idempotency": "node scripts/idempotency-test.mjs"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "name": "flowforge",
+  "version": "2.0.0",
+  "description": "Distributed workflow engine: API + queue-based workers on PostgreSQL, Redis and AWS SQS",
   "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "dev:worker": "tsx watch src/worker.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "start:worker": "node dist/worker.js",
+    "typecheck": "tsc --noEmit -p tsconfig.check.json",
+    "test": "tsx --test test/*.test.ts",
+    "test:e2e": "tsx scripts/e2e-test.ts",
+    "test:load": "tsx scripts/load-test.ts",
+    "test:failure": "tsx scripts/failure-test.ts"
+  },
   "dependencies": {
     "@aws-sdk/client-sqs": "^3.1146.0",
     "dotenv": "^18.0.5",
@@ -34,11 +26,9 @@
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
-    "@types/ioredis": "^4.28.10",
     "@types/node": "^26.6.4",
     "@types/pg": "^8.23.1",
-    "nodemon": "^3.1.14",
-    "ts-node": "^10.9.2",
+    "tsx": "^4.23.15",
     "typescript": "^5.9.3"
   }
 }

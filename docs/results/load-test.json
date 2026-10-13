@@ -1,0 +1,34 @@
+{
+  "ranAt": "2026-10-13T11:29:30.922Z",
+  "executions": 2000,
+  "clientConcurrency": 50,
+  "executionsCompleted": 2000,
+  "executionsFailed": 0,
+  "jobsTotal": 10000,
+  "jobsCompleted": 10000,
+  "wallClockSeconds": 10.5,
+  "throughputJobsPerSecond": 952.1,
+  "peakLiveWorkers": 50,
+  "peakBusyWorkers": 49,
+  "distinctWorkersThatRanJobs": 49,
+  "submitLatencyMs": {
+    "p50": 254,
+    "p95": 308,
+    "p99": 450
+  },
+  "queueWaitMs": {
+    "p50": 106,
+    "p95": 139,
+    "p99": 155
+  },
+  "executionLatencyMs": {
+    "p50": 187,
+    "p95": 236,
+    "p99": 260
+  },
+  "jobDurationMs": {
+    "p50": 29,
+    "p95": 38,
+    "p99": 45
+  }
+}

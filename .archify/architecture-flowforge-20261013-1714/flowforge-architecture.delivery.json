@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "5eb5177e-6aa7-40f8-a21e-0fe910bd2e8e",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "D:\\FlowForge\\.archify\\architecture-flowforge-20261013-1714\\candidate.json",
+  "output": "D:\\FlowForge\\.archify\\architecture-flowforge-20261013-1714\\flowforge-architecture.html",
+  "specification": {
+    "sha256": "2807ce4db9541df374cf6a4ff88d2cf084ca689f94a932a06f64705c1d77d71a",
+    "bytes": 6228
+  },
+  "artifact": {
+    "sha256": "005508f0045900126a53e43cd5fdd82c10ff7272cd9092e46f8f5fb3d73ae4ac",
+    "bytes": 762738
+  }
+}

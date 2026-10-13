@@ -1,92 +1,72 @@
+# Full local stack: PostgreSQL + Redis + SQS (ElasticMQ) + API + workers.
+#   docker compose up -d --build                      # 1 worker container x 10 slots
+#   docker compose up -d --build --scale worker=5     # 5 x 10 = 50 concurrent workers
+x-app-env: &app-env
+  DATABASE_URL: postgresql://flowforge:flowforge@postgres:5432/flowforge
+  REDIS_URL: redis://redis:6379
+  AUTH_TOKEN_SECRET: ${AUTH_TOKEN_SECRET:-local-dev-secret-change-me-0123456789abcdef}
+  SQS_QUEUE_URL: http://elasticmq:9324/000000000000/flowforge-executions
+  AWS_ENDPOINT_URL: http://elasticmq:9324
+  AWS_REGION: us-east-1
+  AWS_ACCESS_KEY_ID: local
+  AWS_SECRET_ACCESS_KEY: local
+  RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-100}
+  JOB_MAX_ATTEMPTS: ${JOB_MAX_ATTEMPTS:-3}
+  EXECUTION_LEASE_MS: ${EXECUTION_LEASE_MS:-30000}
+
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: flowforge-postgres
-    restart: unless-stopped
+    command: ["postgres", "-c", "max_connections=300"]
     environment:
       POSTGRES_DB: flowforge
       POSTGRES_USER: flowforge
       POSTGRES_PASSWORD: flowforge
-    ports:
-      - "5433:5432"
-    volumes:
-      - flowforge-postgres-data:/var/lib/postgresql/data
+    ports: ["5433:5432"]
+    volumes: [postgres-data:/var/lib/postgresql/data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U flowforge -d flowforge"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
+      interval: 3s
+      retries: 20
 
   redis:
     image: redis:7-alpine
-    container_name: flowforge-redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    volumes:
-      - flowforge-redis-data:/data
+    ports: ["6379:6379"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
+      interval: 3s
+      retries: 20
+
+  elasticmq:
+    image: softwaremill/elasticmq-native:1.6.11
+    ports: ["9324:9324"]
+    volumes: [./deploy/local/elasticmq.conf:/opt/elasticmq.conf:ro]
 
   api:
-    build:
-      context: ./app
-      dockerfile: Dockerfile.api
+    build: ./app
     environment:
+      <<: *app-env
       PORT: 3000
-      DATABASE_URL: postgresql://flowforge:flowforge@postgres:5432/flowforge
-      REDIS_URL: redis://redis:6379
-      AUTH_TOKEN_SECRET: ${AUTH_TOKEN_SECRET:-AkgcU6gcPi7aUZPemWD8ktt0j9305Rql}
-      AUTH_ACCESS_TOKEN_TTL_SECONDS: ${AUTH_ACCESS_TOKEN_TTL_SECONDS:-900}
-      AUTH_REFRESH_TOKEN_TTL_SECONDS: ${AUTH_REFRESH_TOKEN_TTL_SECONDS:-604800}
-      AUTH_TOKEN_ISSUER: flowforge-server
-      AUTH_TOKEN_AUDIENCE: flowforge-client
-      JOB_TIMEOUT_MS: ${JOB_TIMEOUT_MS:-30000}
-      AWS_REGION: ${AWS_REGION:-us-east-1}
-      SQS_QUEUE_URL: ${SQS_QUEUE_URL:-}
-      SQS_VISIBILITY_TIMEOUT_SECONDS: ${SQS_VISIBILITY_TIMEOUT_SECONDS:-60}
-      SQS_WAIT_TIME_SECONDS: ${SQS_WAIT_TIME_SECONDS:-20}
-      SQS_MAX_MESSAGES: ${SQS_MAX_MESSAGES:-10}
-    ports:
-      - "3000:3000"
+    ports: ["3000:3000"]
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      elasticmq: { condition: service_started }
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/v1/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:3000/health"]
+      interval: 5s
+      retries: 20
 
   worker:
-    build:
-      context: ./app
-      dockerfile: Dockerfile.worker
+    build: ./app
+    command: ["node", "dist/worker.js"]
     environment:
-      DATABASE_URL: postgresql://flowforge:flowforge@postgres:5432/flowforge
-      REDIS_URL: redis://redis:6379
-      AUTH_TOKEN_SECRET: ${AUTH_TOKEN_SECRET:-AkgcU6gcPi7aUZPemWD8ktt0j9305Rql}
-      AUTH_ACCESS_TOKEN_TTL_SECONDS: ${AUTH_ACCESS_TOKEN_TTL_SECONDS:-900}
-      AUTH_REFRESH_TOKEN_TTL_SECONDS: ${AUTH_REFRESH_TOKEN_TTL_SECONDS:-604800}
-      AUTH_TOKEN_ISSUER: flowforge-server
-      AUTH_TOKEN_AUDIENCE: flowforge-client
-      JOB_TIMEOUT_MS: ${JOB_TIMEOUT_MS:-30000}
-      AWS_REGION: ${AWS_REGION:-us-east-1}
-      SQS_QUEUE_URL: ${SQS_QUEUE_URL:-}
-      SQS_VISIBILITY_TIMEOUT_SECONDS: ${SQS_VISIBILITY_TIMEOUT_SECONDS:-60}
-      SQS_WAIT_TIME_SECONDS: ${SQS_WAIT_TIME_SECONDS:-20}
-      SQS_MAX_MESSAGES: ${SQS_MAX_MESSAGES:-10}
+      <<: *app-env
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-10}
+      DATABASE_POOL_SIZE: 15
+    stop_grace_period: 30s
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      api: { condition: service_healthy }
 
 volumes:
-  flowforge-postgres-data:
-  flowforge-redis-data:
+  postgres-data:

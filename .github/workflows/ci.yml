@@ -1,53 +1,91 @@
-name: FlowForge CI
+name: CI/CD
 
 on:
   push:
-    branches: ["main", "master"]
+    branches: [master]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # lets the deploy job assume an AWS IAM role through OIDC (no stored AWS keys)
 
 jobs:
-  validate:
+  test:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: server
+        working-directory: app
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
-          cache-dependency-path: server/package-lock.json
+          cache-dependency-path: app/package-lock.json
       - run: npm ci
-      - run: npx tsc --noEmit
-      - name: Start dependencies
+      - run: npm run typecheck
+      - run: npm test
+      - name: Start full stack (Postgres, Redis, SQS, API, workers)
         working-directory: .
-        run: docker compose up -d --wait postgres redis
-      - name: Start API for health check
-        run: |
-          AUTH_TOKEN_SECRET=ci-secret-with-at-least-32-characters \
-          AUTH_ACCESS_TOKEN_TTL_SECONDS=900 \
-          AUTH_REFRESH_TOKEN_TTL_SECONDS=604800 \
-          DATABASE_URL=postgresql://flowforge:flowforge@127.0.0.1:5433/flowforge \
-          REDIS_URL=redis://127.0.0.1:6379 \
-          node --loader ts-node/esm src/server.ts > /tmp/flowforge-api.log 2>&1 &
-          for attempt in {1..10}; do
-            curl --fail http://127.0.0.1:3000/health && break
-            sleep 1
-          done
-      - run: npm run smoke
-        env:
-          API_URL: http://127.0.0.1:3000
-      - name: Validate Compose configuration
+        run: docker compose up -d --build --wait --scale worker=2
+      - run: npm run test:e2e
+      - name: Show logs on failure
+        if: failure()
         working-directory: .
-        run: docker compose config
+        run: docker compose logs --tail 200
 
-  build-images:
+  # Runs only on master and only once the repository has AWS settings configured
+  # (Settings -> Secrets and variables -> Actions -> Variables: AWS_REGION, AWS_ACCOUNT_ID, AWS_DEPLOY_ROLE_ARN,
+  # ECR_REPOSITORY, ECS_CLUSTER, APP_SECRET_ARN). One-time AWS setup: docs/aws-deployment.md
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/master' && vars.AWS_DEPLOY_ROLE_ARN != ''
     runs-on: ubuntu-latest
-    needs: validate
     steps:
       - uses: actions/checkout@v4
-      - name: Build API image
-        run: docker build -f server/Dockerfile.api -t flowforge-api:${{ github.sha }} server
-      - name: Build worker image
-        run: docker build -f server/Dockerfile.worker -t flowforge-worker:${{ github.sha }} server
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Build and push image
+        id: image
+        run: |
+          IMAGE=${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ github.sha }}
+          docker build -t "$IMAGE" app
+          docker push "$IMAGE"
+          echo "uri=$IMAGE" >> "$GITHUB_OUTPUT"
+      - name: Fill in account-specific values
+        run: |
+          sed -i "s|<account-id>|${{ vars.AWS_ACCOUNT_ID }}|g; s|<region>|${{ vars.AWS_REGION }}|g; s|<secrets-manager-arn>|${{ vars.APP_SECRET_ARN }}|g" \
+            deploy/aws/ecs/api-task-definition.json deploy/aws/ecs/worker-task-definition.json
+      - name: Render API task definition
+        id: api-task
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: deploy/aws/ecs/api-task-definition.json
+          container-name: flowforge-api
+          image: ${{ steps.image.outputs.uri }}
+      - name: Render worker task definition
+        id: worker-task
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: deploy/aws/ecs/worker-task-definition.json
+          container-name: flowforge-worker
+          image: ${{ steps.image.outputs.uri }}
+      - name: Deploy API (rolling update, waits until healthy)
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.api-task.outputs.task-definition }}
+          service: flowforge-api
+          cluster: ${{ vars.ECS_CLUSTER }}
+          wait-for-service-stability: true
+      - name: Deploy workers
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.worker-task.outputs.task-definition }}
+          service: flowforge-worker
+          cluster: ${{ vars.ECS_CLUSTER }}
+          wait-for-service-stability: true

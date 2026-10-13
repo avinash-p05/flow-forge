@@ -1,0 +1,27 @@
+{
+  "ranAt": "2026-10-13T11:33:08.611Z",
+  "executions": 1000,
+  "failureRatePerAttempt": 0.3,
+  "maxAttemptsPerJob": 5,
+  "workerContainersKilled": [
+    "round 1: e1e6e4726ebe",
+    "round 1: 2fc615ae1979",
+    "round 2: e1e6e4726ebe",
+    "round 2: 2fc615ae1979"
+  ],
+  "jobs_total": 4000,
+  "jobs_completed": 3983,
+  "jobs_dead_lettered": 7,
+  "jobs_skipped": 10,
+  "jobs_affected": 1178,
+  "jobs_recovered": 1171,
+  "jobs_hit_by_worker_crash": 20,
+  "jobs_recovered_from_crash": 20,
+  "failed_attempts": 1689,
+  "lost_attempts": 20,
+  "jobs_completed_twice": 0,
+  "executions_completed": 993,
+  "jobRecoveryRatePercent": 99.41,
+  "crashRecoveryRatePercent": 100,
+  "executionSuccessRatePercent": 99.3
+}
