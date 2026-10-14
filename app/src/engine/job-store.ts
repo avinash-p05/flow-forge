@@ -22,10 +22,8 @@ export type ClaimedJob = {
   input: Record<string, unknown>;
 };
 
-const DUE_OR_ABANDONED = `(
-  (status = 'QUEUED' AND next_attempt_at <= NOW()) OR
-  (status = 'RUNNING' AND locked_until < NOW())
-)`;
+const ABANDONED = `(status = 'RUNNING' AND locked_until < NOW())`;
+const DUE_OR_ABANDONED = `((status = 'QUEUED' AND next_attempt_at <= NOW()) OR ${ABANDONED})`;
 
 const TAKE_LEASE = `status = 'RUNNING', locked_by = $1, locked_until = NOW() + $2::int * INTERVAL '1 millisecond',
   started_at = COALESCE(started_at, NOW())`;
@@ -36,7 +34,7 @@ export const claimNextExecution = async (workerId: string, leaseMs: number): Pro
     `UPDATE executions SET ${TAKE_LEASE}
      WHERE id = (
        SELECT id FROM executions WHERE ${DUE_OR_ABANDONED}
-       ORDER BY next_attempt_at LIMIT 1
+       ORDER BY next_attempt_at, created_at LIMIT 1
        FOR UPDATE SKIP LOCKED
      )
      RETURNING id`,
@@ -45,10 +43,14 @@ export const claimNextExecution = async (workerId: string, leaseMs: number): Pro
   return result.rows[0]?.id ?? null;
 };
 
-/** SQS path: take the execution named in a message, if it is still due. A duplicate message simply fails here. */
+/**
+ * SQS path: take the execution named in a message. A message means "look at this execution now", so there is
+ * no due-time check here; jobs still only run once their own retry time has passed, and an early look simply
+ * requeues it. A duplicate message for an execution another worker holds fails here.
+ */
 export const claimExecution = async (executionId: string, workerId: string, leaseMs: number): Promise<boolean> => {
   const result = await pool.query(
-    `UPDATE executions SET ${TAKE_LEASE} WHERE id = $3 AND ${DUE_OR_ABANDONED}`,
+    `UPDATE executions SET ${TAKE_LEASE} WHERE id = $3 AND (status = 'QUEUED' OR ${ABANDONED})`,
     [workerId, leaseMs, executionId],
   );
   return result.rowCount === 1;
@@ -89,7 +91,7 @@ export const recoverLostJobs = async (executionId: string, maxAttempts: number):
       [ids, message],
     );
     await client.query(
-      `UPDATE jobs SET status = 'RETRYING', next_attempt_at = NOW(), claim_id = NULL, error = $2, error_code = 'WORKER_LOST'
+      `UPDATE jobs SET status = 'RETRYING', next_attempt_at = '-infinity', claim_id = NULL, error = $2, error_code = 'WORKER_LOST'
        WHERE id = ANY($1) AND NOT (id = ANY($3))`,
       [ids, message, exhausted],
     );
@@ -242,19 +244,18 @@ export const settleExecution = async (executionId: string, workerId: string): Pr
   const { rows: [counts] } = await pool.query<{ open: number; failed: number; next_retry: Date | null }>(
     `SELECT count(*) FILTER (WHERE status IN ('PENDING', 'RETRYING', 'RUNNING'))::int AS open,
             count(*) FILTER (WHERE status = 'FAILED')::int AS failed,
-            min(next_attempt_at) FILTER (WHERE status = 'RETRYING') AS next_retry
+            min(next_attempt_at) FILTER (WHERE status = 'RETRYING' AND next_attempt_at > '-infinity') AS next_retry
      FROM jobs WHERE execution_id = $1`,
     [executionId],
   );
 
   if (counts.open > 0) {
-    const nextAttemptAt = counts.next_retry ?? new Date();
     const requeued = await pool.query(
-      `UPDATE executions SET status = 'QUEUED', next_attempt_at = $3, locked_by = NULL, locked_until = NULL
+      `UPDATE executions SET status = 'QUEUED', next_attempt_at = COALESCE($3::timestamptz, '-infinity'), locked_by = NULL, locked_until = NULL
        WHERE id = $1 AND locked_by = $2 AND status = 'RUNNING'`,
-      [executionId, workerId, nextAttemptAt],
+      [executionId, workerId, counts.next_retry],
     );
-    return requeued.rowCount ? { done: false, nextAttemptAt } : { done: true };
+    return requeued.rowCount ? { done: false, nextAttemptAt: counts.next_retry ?? new Date() } : { done: true };
   }
 
   await pool.query(

@@ -25,9 +25,14 @@ export type QueueMessage = { executionId: string | null; receiptHandle: string }
 
 export const isQueueEnabled = (): boolean => client !== null;
 
-export const enqueueExecution = async (executionId: string): Promise<void> => {
+/** `delaySeconds` hides the new message until a scheduled retry is due (SQS allows up to 900 s). */
+export const enqueueExecution = async (executionId: string, delaySeconds = 0): Promise<void> => {
   if (!client) return;
-  await client.send(new SendMessageCommand({ QueueUrl: queueUrl!, MessageBody: JSON.stringify({ executionId }) }));
+  await client.send(new SendMessageCommand({
+    QueueUrl: queueUrl!,
+    MessageBody: JSON.stringify({ executionId }),
+    DelaySeconds: Math.min(900, Math.max(0, Math.ceil(delaySeconds))),
+  }));
 };
 
 /** Long-polls for one message. `executionId` is null when the body is malformed. */

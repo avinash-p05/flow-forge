@@ -1,6 +1,6 @@
 import { config } from '../infra/config.js';
 import { log } from '../infra/log.js';
-import { deleteMessage, delayMessage, isQueueEnabled, receiveExecution, type QueueMessage } from '../infra/queue.js';
+import { deleteMessage, delayMessage, enqueueExecution, isQueueEnabled, receiveExecution, type QueueMessage } from '../infra/queue.js';
 import { getHandler, JobError, runWithTimeout } from './handlers.js';
 import {
   claimExecution, claimNextExecution, claimReadyJobs, completeJob, deadLetterJob, extendLease,
@@ -10,7 +10,6 @@ import {
 import { retryDelayMs } from './rules.js';
 
 const { leaseMs, maxParallelJobs } = config.worker;
-const TERMINAL = ['COMPLETED', 'FAILED', 'CANCELLED'];
 
 /** Runs one job and records the outcome: completed, scheduled for retry, or dead-lettered. */
 const runJob = async (job: ClaimedJob): Promise<void> => {
@@ -73,14 +72,19 @@ const handleMessage = async (message: QueueMessage, workerId: string): Promise<v
   // Malformed messages are left alone; after maxReceiveCount SQS moves them to the dead-letter queue.
   if (!message.executionId) return;
   if (!(await claimExecution(message.executionId, workerId, leaseMs))) {
-    const status = await getExecutionStatus(message.executionId);
-    if (status === null || TERMINAL.includes(status)) await deleteMessage(message);
-    return; // otherwise another worker holds it, or it is not due yet; SQS redelivers it later
+    // Finished, missing, or held by another worker. In the last case that worker re-signals the queue
+    // itself if it schedules a retry (and a crashed holder is found by the database sweep), so this
+    // duplicate message is not needed.
+    await deleteMessage(message);
+    log('queue.message_not_claimed', { executionId: message.executionId, workerId, status: await getExecutionStatus(message.executionId) });
+    return;
   }
   const settlement = await processExecution(message.executionId, workerId, message);
   if (settlement.done) await deleteMessage(message);
-  else await delayMessage(message, (settlement.nextAttemptAt.getTime() - Date.now()) / 1000);
+  else await delayMessage(message, secondsUntil(settlement.nextAttemptAt));
 };
+
+const secondsUntil = (time: Date): number => (time.getTime() - Date.now()) / 1000;
 
 /**
  * One worker slot. Prefers SQS (push-style, low latency) and falls back to sweeping PostgreSQL,
@@ -97,7 +101,10 @@ const pollOnce = async (workerId: string): Promise<boolean> => {
   }
   const executionId = await claimNextExecution(workerId, leaseMs);
   if (!executionId) return false;
-  await processExecution(executionId, workerId);
+  const settlement = await processExecution(executionId, workerId);
+  // Picked up without a message: if it now waits for a retry, put a delayed message on the queue so a
+  // worker is woken when the retry is due (instead of waiting for the next database sweep).
+  if (!settlement.done) await enqueueExecution(executionId, secondsUntil(settlement.nextAttemptAt));
   return true;
 };
 
