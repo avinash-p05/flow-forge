@@ -64,8 +64,21 @@ Job states: `PENDING → RUNNING → COMPLETED`, or `RUNNING → RETRYING → RU
   `status = 'RUNNING' AND locked_until < now()`. The new owner runs `recoverLostJobs`: the dead worker's `RUNNING` jobs are
   marked `LOST` in `job_attempts` and retried. A job that keeps killing workers is dead-lettered once it has used up its attempts.
 - On `SIGTERM` (deploys, scale-in) workers stop taking new work, finish what they are doing, and exit.
-- Measured: [failure-test.json](results/failure-test.json): 99.41% of failure-affected jobs recovered,
-  and all 20 jobs lost to SIGKILLed containers were recovered.
+- Measured on real AWS SQS over 3 runs ([aws-sqs-failure-test*.json](results/)): 99.0% of failure-affected jobs
+  recovered (98.68 / 99.00 / 99.32%), all 72 jobs lost to SIGKILLed containers were recovered, and none was committed twice.
+
+## Timestamps from different processes (a bug the AWS run found)
+
+- New executions used to get `next_attempt_at = now()` from the API's database session, and workers checked
+  `next_attempt_at <= now()` from their own session. Separate Postgres processes saw clocks up to ~100 ms apart, so a
+  worker that got the SQS message within milliseconds sometimes judged the work "not due yet" and left the message
+  hidden for the 30 s visibility timeout: 5% of executions waited about 30 s.
+- Fix: new, replayed and recovered work is due immediately (`next_attempt_at = '-infinity'`); only a scheduled retry
+  stores a real time. An SQS message means "look at this execution now" (no due check). Jobs still check their own
+  retry time, so an early look just requeues. Result: p99 latency went from 29 s to under 1 s.
+- Lesson: don't make correctness depend on comparing timestamps written by different machines or processes.
+- Related rule: whoever holds an execution re-signals the queue when it schedules a retry (it delays its own message, or
+  sends a new delayed one if it came from the database sweep). A message for an execution someone else holds is deleted.
 
 ## Redis rate limiting
 
