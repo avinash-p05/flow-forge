@@ -13,8 +13,13 @@ import { config } from './config.js';
  * workers claim executions with a conditional UPDATE and also sweep the database.
  * Messages that keep failing are moved to the SQS dead-letter queue by its redrive policy.
  */
-const { queueUrl } = config.sqs;
-const client = queueUrl ? new SQSClient({ region: config.sqs.region, endpoint: config.sqs.endpoint }) : null;
+const { endpoint } = config.sqs;
+// With a custom endpoint (ElasticMQ), point the queue URL at that endpoint: the SDK sends requests to the
+// queue URL's host, and the same .env says 127.0.0.1 on the host but `elasticmq` inside Docker.
+const queueUrl = config.sqs.queueUrl && endpoint
+  ? new URL(new URL(config.sqs.queueUrl).pathname, endpoint).toString()
+  : config.sqs.queueUrl;
+const client = queueUrl ? new SQSClient({ region: config.sqs.region, endpoint }) : null;
 
 export type QueueMessage = { executionId: string | null; receiptHandle: string };
 
