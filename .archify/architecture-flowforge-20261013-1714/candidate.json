@@ -91,7 +91,7 @@
       "id": "postgres",
       "type": "database",
       "label": "PostgreSQL",
-      "sublabel": "users, workflows, jobs",
+      "sublabel": "executions · jobs · DLQ",
       "pos": [
         540,
         300
@@ -146,8 +146,8 @@
     {
       "id": "queue",
       "type": "messagebus",
-      "label": "SQS / ElasticMQ",
-      "sublabel": "execution-ready messages",
+      "label": "AWS SQS / ElasticMQ",
+      "sublabel": "execution signals · DLQ",
       "pos": [
         760,
         130
@@ -165,8 +165,8 @@
         },
         {
           "path": "docker-compose.yml",
-          "line": 40,
-          "end_line": 43,
+          "line": 44,
+          "end_line": 47,
           "label": "Local broker"
         }
       ]
@@ -232,7 +232,7 @@
   "boundaries": [
     {
       "kind": "region",
-      "label": "Docker Compose runtime",
+      "label": "FlowForge runtime · Docker Compose / AWS ECS",
       "wraps": [
         "api",
         "auth",
@@ -286,7 +286,7 @@
       "id": "queue-worker",
       "from": "queue",
       "to": "worker",
-      "label": "long-poll / ack",
+      "label": "poll · delay · ack",
       "fromSide": "bottom",
       "toSide": "top",
       "labelDy": 58
