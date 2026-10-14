@@ -7,3 +7,4 @@ app/.env.*
 .DS_Store
 Thumbs.db
 .aws-tmp/
+aws-sqs.env

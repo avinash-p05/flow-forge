@@ -59,7 +59,7 @@ export const processExecution = async (executionId: string, workerId: string, me
       const jobs = await claimReadyJobs(executionId, workerId, maxParallelJobs);
       if (!jobs.length) {
         const settlement = await settleExecution(executionId, workerId);
-        log(settlement.done ? 'execution.settled' : 'execution.waiting_for_retry', { executionId, workerId });
+        log(settlement.done ? 'execution.settled' : 'execution.waiting_for_retry', { executionId, workerId, via: message ? 'sqs' : 'postgres-sweep' });
         return settlement;
       }
       await Promise.all(jobs.map(runJob));
