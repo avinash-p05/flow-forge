@@ -5,11 +5,17 @@ x-app-env: &app-env
   DATABASE_URL: postgresql://flowforge:flowforge@postgres:5432/flowforge
   REDIS_URL: redis://redis:6379
   AUTH_TOKEN_SECRET: ${AUTH_TOKEN_SECRET:-local-dev-secret-change-me-0123456789abcdef}
-  SQS_QUEUE_URL: http://elasticmq:9324/000000000000/flowforge-executions
-  AWS_ENDPOINT_URL: http://elasticmq:9324
-  AWS_REGION: us-east-1
-  AWS_ACCESS_KEY_ID: local
-  AWS_SECRET_ACCESS_KEY: local
+  # Defaults use the local ElasticMQ queue. To use a real AWS SQS queue instead:
+  #   docker compose --env-file aws-sqs.env up -d --build      (see aws-sqs.env.example)
+  # Inputs are SQS_* names on purpose: shell variables beat --env-file, and many machines already
+  # have AWS_REGION / AWS_ACCESS_KEY_ID set globally. SQS_ENDPOINT_URL uses "-" so an empty value
+  # means "real AWS endpoint".
+  SQS_QUEUE_URL: ${SQS_QUEUE_URL:-http://elasticmq:9324/000000000000/flowforge-executions}
+  AWS_ENDPOINT_URL: ${SQS_ENDPOINT_URL-http://elasticmq:9324}
+  AWS_REGION: ${SQS_REGION:-us-east-1}
+  AWS_ACCESS_KEY_ID: ${SQS_ACCESS_KEY_ID:-local}
+  AWS_SECRET_ACCESS_KEY: ${SQS_SECRET_ACCESS_KEY:-local}
+  AWS_SESSION_TOKEN: ${SQS_SESSION_TOKEN:-}
   RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-100}
   JOB_MAX_ATTEMPTS: ${JOB_MAX_ATTEMPTS:-3}
   EXECUTION_LEASE_MS: ${EXECUTION_LEASE_MS:-30000}

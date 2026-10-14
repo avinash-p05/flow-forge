@@ -1,8 +1,9 @@
 import dotenv from 'dotenv';
 
-// Only local development reads a file (app/.env.local). In Docker and on AWS the variables come from
+// Only local development reads a file (app/.env); it overrides variables already set on the machine,
+// such as a global AWS_REGION. In Docker and on AWS the variables come from
 // the environment itself: docker-compose.yml locally, the ECS task definition + Secrets Manager in production.
-if (process.env.NODE_ENV !== 'production') dotenv.config({ path: '.env.local', quiet: true });
+if (process.env.NODE_ENV !== 'production') dotenv.config({ path: '.env', override: true, quiet: true });
 
 const int = (name: string, fallback: number): number => {
   const raw = process.env[name];
