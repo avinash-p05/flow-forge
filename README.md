@@ -69,7 +69,7 @@ app/
 │   ├── worker.ts                 worker entry point (WORKER_CONCURRENCY slots, graceful shutdown)
 │   ├── app.ts                    Express app: request logging, routes, error handler
 │   ├── infra/                    connections to the outside world
-│   │   ├── config.ts             every environment variable in one place (+ loads .env.local in dev)
+│   │   ├── config.ts             every environment variable in one place (+ loads app/.env in dev)
 │   │   ├── db.ts                 PostgreSQL pool, transactions, migration runner
 │   │   ├── redis.ts              Redis client
 │   │   ├── queue.ts              SQS adapter (send, receive, delete, change visibility)
@@ -87,7 +87,7 @@ app/
 │       └── executor.ts           the worker loop
 ├── test/                         unit tests (node:test)
 ├── scripts/                      e2e-test.ts, load-test.ts, failure-test.ts
-└── .env.example                  template for .env.local (local dev only; never used in Docker or AWS)
+└── .env.example                  template for app/.env (local dev only; never used in Docker or AWS)
 deploy/
 ├── local/elasticmq.conf          local SQS queue + its dead-letter queue (used by docker-compose.yml)
 ├── aws/ecs/                      ECS task definitions (used by the CD job in ci.yml)
