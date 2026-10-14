@@ -1,9 +1,14 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 
-// Only local development reads a file (app/.env); it overrides variables already set on the machine,
-// such as a global AWS_REGION. In Docker and on AWS the variables come from
-// the environment itself: docker-compose.yml locally, the ECS task definition + Secrets Manager in production.
-if (process.env.NODE_ENV !== 'production') dotenv.config({ path: '.env', override: true, quiet: true });
+// Local development reads the repository's single .env (resolved from this file, so it works from any
+// working directory, from src/ and dist/). It overrides variables already set on the machine, such as a
+// global AWS_REGION. Containers read no file: docker compose passes .env in, ECS uses the task definition.
+if (process.env.NODE_ENV !== 'production') {
+  const envFile = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../.env');
+  dotenv.config({ path: envFile, override: true, quiet: true });
+}
 
 const int = (name: string, fallback: number): number => {
   const raw = process.env[name];
@@ -16,6 +21,20 @@ const str = (name: string, fallback?: string): string => {
   const value = process.env[name]?.trim() || fallback;
   if (!value) throw new Error(`${name} must be configured`);
   return value;
+};
+
+/**
+ * Optional custom SQS endpoint (ElasticMQ locally; empty or an amazonaws.com URL means real AWS).
+ * docker compose sets LOCAL_SQS_HOST so that a 127.0.0.1/localhost endpoint from the shared .env
+ * resolves to the ElasticMQ container instead of the container itself.
+ */
+const sqsEndpoint = (): string | undefined => {
+  const raw = process.env.AWS_ENDPOINT_URL?.trim();
+  if (!raw) return undefined;
+  const url = new URL(raw);
+  const localHost = process.env.LOCAL_SQS_HOST?.trim();
+  if (localHost && ['127.0.0.1', 'localhost'].includes(url.hostname)) url.host = localHost;
+  return url.origin;
 };
 
 export const config = {
@@ -37,7 +56,7 @@ export const config = {
   sqs: {
     queueUrl: process.env.SQS_QUEUE_URL?.trim() || null,
     region: str('AWS_REGION', 'us-east-1'),
-    endpoint: process.env.AWS_ENDPOINT_URL?.trim() || undefined,
+    endpoint: sqsEndpoint(),
     waitTimeSeconds: int('SQS_WAIT_TIME_SECONDS', 20),
   },
 

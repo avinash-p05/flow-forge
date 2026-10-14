@@ -13,16 +13,26 @@ import { config } from './config.js';
  * workers claim executions with a conditional UPDATE and also sweep the database.
  * Messages that keep failing are moved to the SQS dead-letter queue by its redrive policy.
  */
-const { queueUrl } = config.sqs;
-const client = queueUrl ? new SQSClient({ region: config.sqs.region, endpoint: config.sqs.endpoint }) : null;
+const { endpoint } = config.sqs;
+// With a custom endpoint (ElasticMQ), point the queue URL at that endpoint: the SDK sends requests to the
+// queue URL's host, and the same .env says 127.0.0.1 on the host but `elasticmq` inside Docker.
+const queueUrl = config.sqs.queueUrl && endpoint
+  ? new URL(new URL(config.sqs.queueUrl).pathname, endpoint).toString()
+  : config.sqs.queueUrl;
+const client = queueUrl ? new SQSClient({ region: config.sqs.region, endpoint }) : null;
 
 export type QueueMessage = { executionId: string | null; receiptHandle: string };
 
 export const isQueueEnabled = (): boolean => client !== null;
 
-export const enqueueExecution = async (executionId: string): Promise<void> => {
+/** `delaySeconds` hides the new message until a scheduled retry is due (SQS allows up to 900 s). */
+export const enqueueExecution = async (executionId: string, delaySeconds = 0): Promise<void> => {
   if (!client) return;
-  await client.send(new SendMessageCommand({ QueueUrl: queueUrl!, MessageBody: JSON.stringify({ executionId }) }));
+  await client.send(new SendMessageCommand({
+    QueueUrl: queueUrl!,
+    MessageBody: JSON.stringify({ executionId }),
+    DelaySeconds: Math.min(900, Math.max(0, Math.ceil(delaySeconds))),
+  }));
 };
 
 /** Long-polls for one message. `executionId` is null when the body is malformed. */

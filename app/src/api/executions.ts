@@ -149,12 +149,12 @@ executionRouter.post('/dead-letters/:jobId/replay', async (request, response) =>
     if (!entry) return null;
     await client.query(
       `UPDATE jobs SET status = 'PENDING', attempts = 0, claim_id = NULL, error = NULL, error_code = NULL,
-                       next_attempt_at = NOW(), completed_at = NULL
+                       next_attempt_at = '-infinity', completed_at = NULL
        WHERE id = $1 OR (execution_id = $2 AND status = 'SKIPPED')`,
       [request.params.jobId, entry.execution_id],
     );
     await client.query(
-      `UPDATE executions SET status = 'QUEUED', next_attempt_at = NOW(), error = NULL, completed_at = NULL
+      `UPDATE executions SET status = 'QUEUED', next_attempt_at = '-infinity', error = NULL, completed_at = NULL
        WHERE id = $1 AND status = 'FAILED'`,
       [entry.execution_id],
     );

@@ -12,26 +12,38 @@ Architecture diagram: [flowforge-architecture.html](flowforge-architecture.html)
 
 ## Measured results
 
-Both tests run against the full Docker stack (5 worker containers × 10 slots = 50 workers) and compute
-their numbers from the timestamps stored in PostgreSQL. Raw output: [docs/results/](docs/results/).
+Measured with **real AWS SQS** (`ap-south-1`). The API, 5 worker containers × 10 slots = 50 workers,
+PostgreSQL and Redis ran in Docker, and local ElasticMQ was stopped so every message went through AWS.
+All numbers are computed from the timestamps stored in PostgreSQL. Raw output: [docs/results/](docs/results/).
 
 | Load test ([load-test.ts](app/scripts/load-test.ts)) | |
 |---|---|
 | Workload | 2,000 executions of a 5-step fan-out/fan-in workflow = **10,000 jobs** |
-| Result | 10,000 / 10,000 jobs completed, 0 failed |
-| Concurrent workers | **50 live**, 49 busy at peak |
-| Throughput | ~950 jobs/s (10.5 s wall clock) |
-| Latency | job p95 38 ms · execution end-to-end p95 236 ms · queue wait p95 139 ms |
+| Result | 10,000 / 10,000 jobs completed, 0 failed; 1,997 of 2,000 executions delivered via SQS |
+| Concurrent workers | **50 live, 50 busy** at peak; all 50 ran jobs |
+| Throughput | ~700 jobs/s (14.3 s wall clock) |
+| Latency | job p95 60 ms · execution end-to-end p50 339 ms / p95 651 ms / p99 768 ms |
 
-| Failure-injection test ([failure-test.ts](app/scripts/failure-test.ts)) | |
+| Failure-injection test ([failure-test.ts](app/scripts/failure-test.ts)), 3 runs | |
 |---|---|
-| Workload | 1,000 executions × 4 steps = 4,000 jobs |
+| Workload per run | 1,000 executions × 4 steps = 4,000 jobs (12,000 jobs in total) |
 | Injected failures | every attempt fails with 30% probability, **and** 2 of 5 worker containers are SIGKILLed twice mid-run |
-| Jobs that hit ≥1 failure or crash | 1,178 |
-| Of those, recovered and completed | 1,171 → **99.41% recovery** |
-| Jobs lost to a killed worker | 20, all 20 recovered (100%) |
+| Job recovery per run | 98.68% · 99.00% · 99.32% |
+| Combined | 3,556 of 3,592 failure-affected jobs recovered → **99.0% recovery** |
+| Jobs lost to a killed worker | 72, all 72 recovered (100%) |
 | Jobs committed twice | 0 |
-| Execution success rate | 99.3% (the 7 jobs that failed all 5 attempts went to the dead-letter queue) |
+| Execution success rate | 98.8% (2,964 / 3,000); the 36 jobs that failed all 5 attempts went to the dead-letter queue |
+
+Expected recovery for these settings is 1 − 0.3⁴ ≈ 99.2% (a job that has failed once still gets 4 more attempts),
+so the measured rates match the math. The observed per-attempt failure rate was 29.96%.
+
+**Local run with ElasticMQ** (an SQS-compatible broker in Docker): 10,000 / 10,000 jobs at ~950 jobs/s, and 99.41%
+recovery in one failure-injection run ([load-test.json](docs/results/load-test.json), [failure-test.json](docs/results/failure-test.json)).
+
+**What the AWS run uncovered:** at first, 5% of executions waited about 30 s. Separate database processes saw clocks
+up to ~100 ms apart, so a worker sometimes judged brand-new work "not due yet" and left its SQS message hidden for
+the 30 s visibility timeout. The fix: new work is always due immediately, and an SQS message means "look at this
+execution now". After it, p99 latency dropped from 29 s to under 1 s.
 
 ## How it works
 
@@ -69,7 +81,7 @@ app/
 │   ├── worker.ts                 worker entry point (WORKER_CONCURRENCY slots, graceful shutdown)
 │   ├── app.ts                    Express app: request logging, routes, error handler
 │   ├── infra/                    connections to the outside world
-│   │   ├── config.ts             every environment variable in one place (+ loads app/.env in dev)
+│   │   ├── config.ts             every environment variable in one place (+ loads the root .env in dev)
 │   │   ├── db.ts                 PostgreSQL pool, transactions, migration runner
 │   │   ├── redis.ts              Redis client
 │   │   ├── queue.ts              SQS adapter (send, receive, delete, change visibility)
@@ -86,8 +98,8 @@ app/
 │       ├── job-store.ts          every SQL statement the worker runs (leases, fencing, retries, DLQ)
 │       └── executor.ts           the worker loop
 ├── test/                         unit tests (node:test)
-├── scripts/                      e2e-test.ts, load-test.ts, failure-test.ts
-└── .env.example                  template for app/.env (local dev only; never used in Docker or AWS)
+└── scripts/                      e2e-test.ts, load-test.ts, failure-test.ts
+.env.example                      template for the single .env (read by npm scripts and docker compose)
 deploy/
 ├── local/elasticmq.conf          local SQS queue + its dead-letter queue (used by docker-compose.yml)
 ├── aws/ecs/                      ECS task definitions (used by the CD job in ci.yml)
@@ -99,7 +111,12 @@ deploy/
 
 Requires Docker and Node.js 22.
 
+All configuration lives in one file, `.env` at the repository root. `npm` scripts and `docker compose` both
+read it. Inside Docker, the database, Redis and ElasticMQ addresses are switched to container hostnames
+automatically. To use a real AWS SQS queue, set its URL, region and keys in `.env` and leave `AWS_ENDPOINT_URL` empty.
+
 ```bash
+cp .env.example .env                             # local defaults: ElasticMQ, local Postgres/Redis
 docker compose up -d --build --scale worker=5    # Postgres, Redis, SQS (ElasticMQ), API, 5 workers × 10 slots
 cd app && npm install
 npm test                 # unit tests

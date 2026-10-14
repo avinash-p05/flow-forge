@@ -28,7 +28,9 @@ jobs:
       - run: npm test
       - name: Start full stack (Postgres, Redis, SQS, API, workers)
         working-directory: .
-        run: docker compose up -d --build --wait --scale worker=2
+        run: |
+          cp .env.example .env
+          docker compose up -d --build --wait --scale worker=2
       - run: npm run test:e2e
       - name: Show logs on failure
         if: failure()
